@@ -180,7 +180,7 @@ main(int argc, char **argv)
     files.count = argc - 2;
     files.fileNames = calloc(argc - 2, sizeof(char*));
 
-    total_time = calloc(argc - 2, sizeof(double));
+    total_time = calloc(count_coroutines, sizeof(double));
 
     int k = 0;
     for(int i = 2; i < argc; ++i) {
@@ -252,13 +252,16 @@ main(int argc, char **argv)
     for (int i = 0; i < vector.size; ++i) {
         fprintf(writeFile, "%d ", vector.data[i]);
     }
+
     fclose(writeFile);
     freeVector(&vector);
+    free(files.fileNames);
 
     for(int i = 0; i < global_counter; ++i) {
         printf("Coroutine #%d time is %f seconds\n", global_counter - i - 1, total_time[i]);
     }
 
+    free(total_time);
     clock_t toc = clock();
     printf("Elapsed: %f seconds\n", (double)(toc - tic) / CLOCKS_PER_SEC);
 
