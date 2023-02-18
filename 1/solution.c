@@ -127,6 +127,8 @@ coroutine_func_f(void *context)
     printf("Started coroutine %s\n", name);
     free(name);
 
+    clock_t tic = clock();
+
     int my_counter = global_counter++;
     while(files.current < files.count) {
         char *fileName = files.fileNames[files.current];
@@ -146,7 +148,10 @@ coroutine_func_f(void *context)
             for (int j = 0; j < vector.size - i; j += 2 * i) {
                 merge(vector, j, j + i, min(j + 2 * i, vector.size));
             }
+            clock_t toc = clock();
+            total_time[my_counter] += (double)(toc - tic) / CLOCKS_PER_SEC;
             coro_yield();
+            tic = clock();
         }
 
         char tempFileName[256];
@@ -167,16 +172,18 @@ coroutine_func_f(void *context)
 int
 main(int argc, char **argv)
 {
+    int count_coroutines = atoi(argv[1]);
+
     clock_t tic = clock();
 
     files.current = 0;
-    files.count = argc - 1;
-    files.fileNames = calloc(argc - 1, sizeof(char*));
+    files.count = argc - 2;
+    files.fileNames = calloc(argc - 2, sizeof(char*));
 
-    total_time = calloc(argc - 1, sizeof(double));
+    total_time = calloc(argc - 2, sizeof(double));
 
     int k = 0;
-    for(int i = 1; i < argc; ++i) {
+    for(int i = 2; i < argc; ++i) {
         files.fileNames[k] = argv[i];
         ++k;
     }
@@ -184,7 +191,7 @@ main(int argc, char **argv)
 	/* Initialize our coroutine global cooperative scheduler. */
 	coro_sched_init();
 	/* Start several coroutines. */
-	for (int i = 0; i < 3; ++i) {
+	for (int i = 0; i < count_coroutines; ++i) {
 		/*
 		 * The coroutines can take any 'void *' interpretation of which
 		 * depends on what you want. Here as an example I give them
@@ -247,6 +254,10 @@ main(int argc, char **argv)
     }
     fclose(writeFile);
     freeVector(&vector);
+
+    for(int i = 0; i < global_counter; ++i) {
+        printf("Coroutine #%d time is %f seconds\n", global_counter - i - 1, total_time[i]);
+    }
 
     clock_t toc = clock();
     printf("Elapsed: %f seconds\n", (double)(toc - tic) / CLOCKS_PER_SEC);
