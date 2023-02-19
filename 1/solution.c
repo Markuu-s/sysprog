@@ -3,6 +3,7 @@
 #include <string.h>
 #include "libcoro.h"
 #include <time.h>
+#include "Vector.h"
 
 struct Files{
     char **fileNames;
@@ -10,48 +11,10 @@ struct Files{
     int current;
 } files;
 
-typedef struct
-{
-    int *data;
-    int size;
-    int capacity;
-} Vector;
-
 double *total_time;
-
-void init_vector(Vector *v)
-{
-    v->capacity = 8;
-    v->size = 0;
-    v->data = malloc(v->capacity * sizeof(int));
-}
-
-/**
- * @brief Add to end to vector of data
- *
- * @param v is pointer to Vector
- * @param data element to add in back of vector
- */
-void push_back(Vector *v, int data)
-{
-    if (v->capacity == v->size)
-    {
-        v->capacity *= 2;
-        v->data = realloc(v->data, sizeof(int) * v->capacity);
-    }
-    v->data[v->size++] = data;
-}
-
-
-/**
- * @brief Free memory of struct Vector
- *
- * @param v is pointer to Vector
- */
-void freeVector(Vector *v)
-{
-    free(v->data);
-}
+int global_counter = 0;
+Vector *vectors;
+int global_counter_vector = 0;
 
 /**
  * You can compile and run this code using the commands:
@@ -79,43 +42,42 @@ int min(int a, int b) {
     return a < b ? a : b;
 }
 
-void merge(Vector vector, int left, int mid, int right) {
+void merge(Vector *vector, int left, int mid, int right) {
     int it1 = 0;
     int it2 = 0;
 
     Vector result;
     init_vector(&result);
-    result.capacity = vector.capacity;
+    result.capacity = vector->capacity;
     result.data = realloc(result.data, sizeof(int) * result.capacity);
 
     while (left + it1 < mid && mid + it2 < right) {
-        if (vector.data[left + it1] < vector.data[mid + it2]) {
-            result.data[it1 + it2] = vector.data[left + it1];
+        if (vector->data[left + it1] < vector->data[mid + it2]) {
+            result.data[it1 + it2] = vector->data[left + it1];
             it1 += 1;
         }
         else {
-            result.data[it1 + it2] = vector.data[mid + it2];
+            result.data[it1 + it2] = vector->data[mid + it2];
             it2 += 1;
         }
     }
 
     while (left + it1 < mid) {
-        result.data[it1 + it2] = vector.data[left + it1];
+        result.data[it1 + it2] = vector->data[left + it1];
         it1 += 1;
     }
 
     while (mid + it2 < right) {
-        result.data[it1 + it2] = vector.data[mid + it2];
+        result.data[it1 + it2] = vector->data[mid + it2];
         it2 += 1;
     }
 
     for (int i = 0; i < it1 + it2; ++i) {
-        vector.data[left + i] = result.data[i];
+        vector->data[left + i] = result.data[i];
     }
     freeVector(&result);
 }
 
-int global_counter = 0;
 /**
  * Coroutine body. This code is executed by all the coroutines. Here you
  * implement your solution, sort each individual file.
@@ -146,7 +108,7 @@ coroutine_func_f(void *context)
 
         for (int i = 1; i < vector.size; i *= 2) {
             for (int j = 0; j < vector.size - i; j += 2 * i) {
-                merge(vector, j, j + i, min(j + 2 * i, vector.size));
+                merge(&vector, j, j + i, min(j + 2 * i, vector.size));
             }
             clock_t toc = clock();
             total_time[my_counter] += (double)(toc - tic) / CLOCKS_PER_SEC;
@@ -154,14 +116,11 @@ coroutine_func_f(void *context)
             tic = clock();
         }
 
-        char tempFileName[256];
-        sprintf(tempFileName, "%d", my_counter);
-        strcat(tempFileName, "_temp.txt");
-        FILE *writeFile = fopen(tempFileName, "w");
+        init_vector(&vectors[global_counter_vector]);
         for (int i = 0; i < vector.size; ++i) {
-            fprintf(writeFile, "%d ", vector.data[i]);
+            push_back(&vectors[global_counter_vector], vector.data[i]);
         }
-        fclose(writeFile);
+        global_counter_vector++;
         freeVector(&vector);
 
     }
@@ -178,9 +137,10 @@ main(int argc, char **argv)
 
     files.current = 0;
     files.count = argc - 2;
-    files.fileNames = calloc(argc - 2, sizeof(char*));
+    files.fileNames = calloc(files.count, sizeof(char*));
 
     total_time = calloc(count_coroutines, sizeof(double));
+    vectors = calloc(files.count, sizeof(Vector));
 
     int k = 0;
     for(int i = 2; i < argc; ++i) {
@@ -188,64 +148,35 @@ main(int argc, char **argv)
         ++k;
     }
 
-	/* Initialize our coroutine global cooperative scheduler. */
 	coro_sched_init();
-	/* Start several coroutines. */
 	for (int i = 0; i < count_coroutines; ++i) {
-		/*
-		 * The coroutines can take any 'void *' interpretation of which
-		 * depends on what you want. Here as an example I give them
-		 * some names.
-		 */
 		char name[16];
 		sprintf(name, "coro_%d", i);
-		/*
-		 * I have to copy the name. Otherwise, all the coroutines would
-		 * have the same name when they finally start.
-		 */
 		coro_new(coroutine_func_f, strdup(name));
 	}
-	/* Wait for all the coroutines to end. */
 	struct coro *c;
 	while ((c = coro_sched_wait()) != NULL) {
-		/*
-		 * Each 'wait' returns a finished coroutine with which you can
-		 * do anything you want. Like check its exit status, for
-		 * example. Don't forget to free the coroutine afterwards.
-		 */
 		printf("Finished %d\n", coro_status(c));
 		coro_delete(c);
 	}
-	/* All coroutines have finished. */
 
-    char tempFileName[256];
-    sprintf(tempFileName, "%d", 0);
-    strcat(tempFileName, "_temp.txt");
-
-    FILE *myFile = fopen(tempFileName, "r");
     Vector vector;
     init_vector(&vector);
 
-    int temp;
-    while (fscanf(myFile, "%d", &temp) != EOF) {
-        push_back(&vector, temp);
+    for(int i = 0; i < vectors[0].size; ++i) {
+        push_back(&vector, vectors[0].data[i]);
     }
-    fclose(myFile);
+    freeVector(&vectors[0]);
 
     for(int i = 1; i < files.count; ++i) {
-        sprintf(tempFileName, "%d", i);
-        strcat(tempFileName, "_temp.txt");
-
         int last_sz = vector.size;
 
-        myFile = fopen(files.fileNames[i], "r");
-
-        while (fscanf(myFile, "%d", &temp) != EOF) {
-            push_back(&vector, temp);
+        for(int j = 0; j < vectors[i].size; ++j) {
+            push_back(&vector, vectors[i].data[j]);
         }
-        fclose(myFile);
+        freeVector(&vectors[i]);
 
-        merge(vector, 0, last_sz - 1, vector.size);
+        merge(&vector, 0, last_sz - 1, vector.size);
     }
 
     FILE *writeFile = fopen("result.txt", "w");
@@ -255,6 +186,7 @@ main(int argc, char **argv)
 
     fclose(writeFile);
     freeVector(&vector);
+    free(vectors);
     free(files.fileNames);
 
     for(int i = 0; i < global_counter; ++i) {
