@@ -176,7 +176,7 @@ main(int argc, char **argv)
         }
         freeVector(&vectors[i]);
 
-        merge(&vector, 0, last_sz - 1, vector.size);
+        merge(&vector, 0, last_sz, vector.size);
     }
 
     FILE *writeFile = fopen("result.txt", "w");
