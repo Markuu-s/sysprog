@@ -33,6 +33,7 @@ void freeVector(Vector *v)
     for(int i = 0; i < v->size; ++i){
         free(v->data[i]);
     }
+    free(v->data);
 }
 
 void set(Vector *v, int idx, void *data)

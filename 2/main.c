@@ -2,7 +2,6 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include "Vector/Vector.h"
-#include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 
@@ -45,12 +44,6 @@ void write_to_string(char *string, char x) {
     string[old_len + 1] = '\0';
 }
 
-NextCommand *make_command(NextCommand n) {
-    NextCommand *nextCommand = calloc(1, sizeof(NextCommand));
-    *nextCommand = n;
-    return nextCommand;
-}
-
 #define add_command_and_clear(cmd, lineCmd, string, first_command)      \
     if (write_to_file) {                                                \
         Cmd temp = *(Cmd*)get(&lineCmd.cmds, lineCmd.cmds.size - 1);    \
@@ -71,11 +64,14 @@ NextCommand *make_command(NextCommand n) {
 
 #define reread_line(line)   \
 i = -1;                     \
-free(line);                 \
+if (line_change)free(line); \
 size_t sz = 0;              \
+line_change = 1;            \
 getline(&line, &sz, stdin);
 
 LineCmd parse(char *line) {
+    NextCommand temp_command;
+
     LineCmd lineCmd;
     init_line_cmd(&lineCmd);
 
@@ -84,6 +80,8 @@ LineCmd parse(char *line) {
 
     char string[1024];
     string[0] = '\0';
+
+    int line_change = 0;
 
     int first_command = 0;
     int was_space = 0;
@@ -108,12 +106,13 @@ LineCmd parse(char *line) {
             case '&': {
                 if (single_quote_is_open == 0 && double_quote_is_open == 0) {
                     if (i + 1 < strlen(line) && line[i + 1] == '&') { // &&
-                        push_back(&lineCmd.nexts, (void *) make_command(AND));
+                        temp_command = AND;
+                        push_back(&lineCmd.nexts,(void*) &temp_command);
                     } else { // &
                         cmd.background = 1;
                     }
 
-                    add_command_and_clear(cmd, lineCmd, string, first_command);
+                    add_command_and_clear(cmd, lineCmd, string, first_command)
                 } else {
                     write_to_string(string, line[i]);
                 }
@@ -122,13 +121,15 @@ LineCmd parse(char *line) {
             case '|': {
                 if (single_quote_is_open == 0 && double_quote_is_open == 0) {
                     if (i + 1 < strlen(line) && line[i + 1] == '|') { // ||
-                        push_back(&lineCmd.nexts, (void *) make_command(OR));
+                        temp_command = OR;
+                        push_back(&lineCmd.nexts, (void *) &temp_command);
                         ++i;
                     } else { // |
-                        push_back(&lineCmd.nexts, (void *) make_command(PIPE));
+                        temp_command = PIPE;
+                        push_back(&lineCmd.nexts, (void *) &temp_command);
                     }
 
-                    add_command_and_clear(cmd, lineCmd, string, first_command);
+                    add_command_and_clear(cmd, lineCmd, string, first_command)
                 } else {
                     write_to_string(string, line[i]);
                 }
@@ -165,14 +166,14 @@ LineCmd parse(char *line) {
                     if (line[i + 1] == '\\' || line[i + 1] == ' ') {
                         write_to_string(string, line[++i]);
                     } else if (
-                            single_quote_is_open == 1 && line[i + 1] == '\'' ||
-                            double_quote_is_open == 1 && line[i + 1] == '\"') {
+                            (single_quote_is_open == 1 && line[i + 1] == '\'') ||
+                                    (double_quote_is_open == 1 && line[i + 1] == '\"')) {
                         write_to_string(string, line[i++]);
                         write_to_string(string, line[i]);
                     } else if (
                             single_quote_is_open == 0 && double_quote_is_open == 0 && line[i + 1] == '\n'
                             ) {
-                        reread_line(line);
+                        reread_line(line)
                     }
                 }
                 break;
@@ -190,7 +191,7 @@ LineCmd parse(char *line) {
             case '\n': {
                 if (single_quote_is_open || double_quote_is_open) {
                     write_to_string(string, line[i]);
-                    reread_line(line);
+                    reread_line(line)
                 }
                 break;
             }
@@ -210,9 +211,14 @@ LineCmd parse(char *line) {
         cmd.argv[cmd.last_elem++] = strdup(string);
     }
 
-//    add_command_and_clear(cmd, lineCmd, string, first_command);
     push_back(&lineCmd.cmds, (void *) &cmd);
-    push_back(&lineCmd.nexts, (void *) make_command(NONE));
+
+    temp_command = NONE;
+    push_back(&lineCmd.nexts, (void *) &temp_command);
+
+    if(line_change) {
+        free(line);
+    }
     return lineCmd;
 }
 
@@ -224,7 +230,6 @@ char *read_line() {
         exit(EXIT_FAILURE);
     }
 
-//    line[strlen(line) - 1] = '\0';
     return line;
 }
 
@@ -280,9 +285,6 @@ void execute_line_cmd(LineCmd lineCmd) {
             int current = i;
             int end = i + 1;
 
-//            int stdin_dup = dup(STDIN_FILENO);
-//            int stdout_dup = dup(STDOUT_FILENO);
-
             while (end < lineCmd.nexts.size && *(NextCommand *) get(&lineCmd.nexts, end) == PIPE) ++end;
 
             int fd[2], prev_fd[2];
@@ -301,17 +303,15 @@ void execute_line_cmd(LineCmd lineCmd) {
                         close(fd[0]);
                         dup2(fd[1], STDOUT_FILENO);
 
-//                        close(fd[1]);
                         close(prev_fd[0]);
                         close(prev_fd[1]);
                     } else if (current == end) {
                         close(prev_fd[1]);
                         dup2(prev_fd[0], STDIN_FILENO);
 
-//                        close(prev_fd[0]);
                         close(fd[0]);
                         close(fd[1]);
-                        NEED_WRITE(current_cmd);
+                        NEED_WRITE(current_cmd)
                     } else {
                         close(prev_fd[1]);
                         close(fd[0]);
@@ -319,8 +319,6 @@ void execute_line_cmd(LineCmd lineCmd) {
                         dup2(prev_fd[0], STDIN_FILENO);
                         dup2(fd[1], STDOUT_FILENO);
 
-//                        close(prev_fd[0]);
-//                        close(fd[1]);
                     }
 
                     current_cmd->argv[current_cmd->last_elem] = NULL;
@@ -336,23 +334,36 @@ void execute_line_cmd(LineCmd lineCmd) {
             close(fd[0]);
             close(fd[1]);
             i = end;
-//            dup2(stdin_dup, STDIN_FILENO);
-//            dup2(stdout_dup, STDOUT_FILENO);
 
+            free(pids);
         } else if (nextCommand == NONE) {
 
             if (fork() == 0) {
                 Cmd *current_cmd = (Cmd *) get(&lineCmd.cmds, i);
 
-                NEED_WRITE(current_cmd);
+                NEED_WRITE(current_cmd)
 
                 current_cmd->argv[current_cmd->last_elem] = NULL;
                 execvp(current_cmd->argv[0], current_cmd->argv);
                 exit(1);
             }
             wait(NULL);
+        } else if (nextCommand == AND || nextCommand == OR) {
+
         }
     }
+}
+
+void free_line_cmd(LineCmd *lineCmd) {
+    for(int i = 0; i < lineCmd->cmds.size; ++i) {
+        Cmd *cmd = get(&lineCmd->cmds, i);
+        for(int j = 0; j < cmd->last_elem; ++j) {
+            free(cmd->argv[j]);
+        }
+        free(cmd->write_to_file);
+    }
+    freeVector(&lineCmd->cmds);
+    freeVector(&lineCmd->nexts);
 }
 
 int main() {
@@ -362,8 +373,13 @@ int main() {
 
         char *line = read_line();
         LineCmd lineCmd = parse(line);
+        free(line);
 
 //        print_line_cmd(lineCmd);
         execute_line_cmd(lineCmd);
+
+//        heaph_get_alloc_count();
+
+        free_line_cmd(&lineCmd);
     }
 }
