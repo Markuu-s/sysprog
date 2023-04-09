@@ -1,6 +1,8 @@
 #include "thread_pool.h"
-#include "unit.h"
+#include "utils/unit.h"
 #include <pthread.h>
+#include <unistd.h>
+#include "utils/heap_help/heap_help.h"
 
 static void
 test_new(void)
@@ -118,5 +120,7 @@ main(void)
 	test_thread_pool_delete();
 
 	unit_test_finish();
+
+//    printf("%lu\n", heaph_get_alloc_count());
 	return 0;
 }
