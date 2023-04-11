@@ -40,6 +40,14 @@ $> cat "my file with whitespaces in name.txt"
 truncate
 test 'test'' \
 
+$> echo "4">file
+
+$> cat file
+4
+
+$> echo 100|grep 100
+100
+
 ----------------------------------------------------------------03
 
 $> # Comment
@@ -85,6 +93,25 @@ $> echo 'source string' | sed 's/source/destination/g' | sed 's/string/value/g' 
 $> cat result.txt
 destination value
 
+$> yes bigdata | head -n 100000 | wc -l | tr -d [:blank:]
+100000
+
+$> exit 123 | echo 100
+100
+
+$> echo 100 | exit 123
+
+$> printf "import time\n\
+time.sleep(0.1)\n\
+f = open('test.txt', 'a')\n\
+f.write('Text\\\\n')\n\
+f.close()\n" > test.py
+
+$> python test.py | exit 0
+
+$> cat test.txt
+Text
+
 ----------------------------------------------------------------05
 
 $> false && echo 123
@@ -100,6 +127,20 @@ $> true || false || true && echo 123
 
 $> false || echo 123
 123
+
+$> echo 100 || echo 200
+100
+
+$> echo 100 && echo 200
+100
+200
+
+$> echo 100 | grep 1 || echo 200 | grep 2
+100
+
+$> echo 100 | grep 1 && echo 200 | grep 2
+100
+200
 
 ----------------------------------------------------------------06
 

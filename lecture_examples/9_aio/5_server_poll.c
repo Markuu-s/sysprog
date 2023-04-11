@@ -16,12 +16,12 @@ int
 interact(int client_sock)
 {
 	int buffer = 0;
-	ssize_t size = read(client_sock, &buffer, sizeof(buffer));
+	ssize_t size = recv(client_sock, &buffer, sizeof(buffer), 0);
 	if (size <= 0)
 		return (int) size;
 	printf("Received %d\n", buffer);
 	buffer++;
-	size = write(client_sock, &buffer, sizeof(buffer));
+	size = send(client_sock, &buffer, sizeof(buffer), 0);
 	if (size > 0)
 		printf("Sent %d\n", buffer);
 	return (int) size;
@@ -95,9 +95,9 @@ main(int argc, const char **argv)
 			int rc = interact(fds[i].fd);
 			if (rc == -1) {
 				printf("error = %s\n", strerror(errno));
-				break;
-			}
-			if (rc == 0) {
+				if (errno != EWOULDBLOCK && errno != EAGAIN)
+					break;
+			} else if (rc == 0) {
 				printf("Client disconnected\n");
 				remove_client(&fds, &fd_count, i);
 			}

@@ -1,3 +1,5 @@
+#pragma once
+
 #include <sys/types.h>
 
 #define NEED_OPEN_FLAGS

@@ -31,7 +31,6 @@ int global_counter_vector = 0;
 static void
 other_function(const char *name, int depth)
 {
-	struct coro *this = coro_this();
 	printf("%s: entered function, depth = %d\n", name, depth);
 	coro_yield();
 	if (depth < 3)
