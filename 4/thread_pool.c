@@ -3,6 +3,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdatomic.h>
+#include <float.h>
+#include <asm-generic/errno.h>
+#include <limits.h>
 
 
 struct thread_task {
@@ -15,6 +18,7 @@ struct thread_task {
     bool is_running;
     bool is_join;
     bool is_pushed;
+    bool is_detach;
 
     void *returned;
 
@@ -96,7 +100,6 @@ void *task_thread_fun(void *void_arg_task_thread_fun) {
         }
 
         thread_pool->threads[idx].is_working = true;
-
         {
             pthread_mutex_lock(&thread_task->mutex);
 
@@ -112,6 +115,9 @@ void *task_thread_fun(void *void_arg_task_thread_fun) {
 
             pthread_cond_signal(&thread_task->cond);
             pthread_mutex_unlock(&thread_task->mutex);
+            if (thread_task->is_detach) {
+                free(thread_task);
+            }
         }
 
         thread_pool->threads[idx].is_working = false;
@@ -183,6 +189,7 @@ thread_pool_push_task(struct thread_pool *pool, struct thread_task *task) {
     task->is_running = false;
     task->is_join = false;
     task->is_pushed = true;
+    task->is_detach = false;
 
     struct queue_task *queue_task = &pool->queue_task;
     pthread_mutex_lock(&queue_task->mutex);
@@ -226,6 +233,7 @@ thread_task_new(struct thread_task **task, thread_task_f function, void *arg) {
     (*task)->is_running = false;
     (*task)->is_join = false;
     (*task)->is_pushed = false;
+    (*task)->is_detach = false;
 
     return 0;
 }
@@ -240,15 +248,29 @@ thread_task_is_running(const struct thread_task *task) {
     return task->is_running;
 }
 
+#ifdef NEED_TIMED_JOIN
 int
-thread_task_join(struct thread_task *task, void **result) {
+thread_task_timed_join(struct thread_task *task, double timeout, void **result) {
+    if (task->is_detach) {
+        return TPOOL_ERR_TASK_IS_DETACH;
+    }
+
     if (task->is_pushed == false) {
         return TPOOL_ERR_TASK_NOT_PUSHED;
     }
 
+    struct timespec timespec;
+    clock_gettime(CLOCK_REALTIME, &timespec);
+    long int sec = (long int)timeout;
+    long int n_sec = (long int)((timeout - (double)sec) * 1e9);
+    timespec.tv_sec += sec;
+    timespec.tv_nsec += n_sec;
+
     pthread_mutex_lock(&task->mutex);
     while (task->is_finished == false) {
-        pthread_cond_wait(&task->cond, &task->mutex);
+        if (pthread_cond_timedwait(&task->cond, &task->mutex, &timespec) == ETIMEDOUT) {
+            return TPOOL_ERR_TIMEOUT;
+        }
     }
 
     *result = task->returned;
@@ -257,9 +279,14 @@ thread_task_join(struct thread_task *task, void **result) {
 
     return 0;
 }
+#endif
 
 int
 thread_task_delete(struct thread_task *task) {
+    if (task->is_detach) {
+       return TPOOL_ERR_TASK_IS_DETACH;
+    }
+
     if (task->is_join != true && task->is_pushed == true) {
         return TPOOL_ERR_TASK_IN_POOL;
     }
@@ -273,8 +300,19 @@ thread_task_delete(struct thread_task *task) {
 int
 thread_task_detach(struct thread_task *task)
 {
-    /* IMPLEMENT THIS FUNCTION */
-    return TPOOL_ERR_NOT_IMPLEMENTED;
+    if (task->is_pushed == false) {
+        return TPOOL_ERR_TASK_NOT_PUSHED;
+    }
+    task->is_detach = true;
+    return 0;
 }
 
 #endif
+
+
+int
+thread_task_join(struct thread_task *task, void **result)
+{
+    return thread_task_timed_join(task, INT_MAX, result);
+}
+
