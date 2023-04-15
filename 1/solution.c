@@ -23,20 +23,6 @@ int global_counter_vector = 0;
  * $> ./a.out
  */
 
-/**
- * A function, called from inside of coroutines recursively. Just to demonstrate
- * the example. You can split your code into multiple functions, that usually
- * helps to keep the individual code blocks simple.
- */
-static void
-other_function(const char *name, int depth)
-{
-	printf("%s: entered function, depth = %d\n", name, depth);
-	coro_yield();
-	if (depth < 3)
-		other_function(name, depth + 1);
-}
-
 int min(int a, int b) {
     return a < b ? a : b;
 }
