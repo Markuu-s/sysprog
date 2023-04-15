@@ -51,7 +51,6 @@ struct thread_pool {
     int capacity;
     atomic_int busy_now;
 
-    pthread_t main_thread;
     struct queue_task queue_task;
     atomic_bool is_dead;
 };
@@ -79,7 +78,7 @@ void *task_thread_fun(void *void_arg_task_thread_fun) {
                 if (atomic_load(&thread_pool->is_dead) == true) {
                     pthread_mutex_unlock(&queue_task->mutex);
                     free(void_arg_task_thread_fun);
-                    pthread_exit(0);
+                    return NULL;
                 }
             }
 
@@ -104,7 +103,9 @@ void *task_thread_fun(void *void_arg_task_thread_fun) {
             thread_task->is_running = true;
             thread_task->is_finished = false;
 
+            pthread_mutex_unlock(&thread_task->mutex);
             thread_task->returned = thread_task->function(thread_task->arg);
+            pthread_mutex_lock(&thread_task->mutex);
 
             thread_task->is_running = false;
             thread_task->is_finished = true;
@@ -119,7 +120,7 @@ void *task_thread_fun(void *void_arg_task_thread_fun) {
     }
 
     free(void_arg_task_thread_fun);
-    pthread_exit(0);
+    return NULL;
 }
 
 int
@@ -163,7 +164,6 @@ thread_pool_delete(struct thread_pool *pool) {
     for (int i = 0; i < pool->size; ++i) {
         pthread_join(pool->threads[i].thread, NULL);
     }
-    pthread_join(pool->main_thread, NULL);
 
     free(pool->threads);
     free(pool);
