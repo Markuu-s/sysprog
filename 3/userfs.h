@@ -3,7 +3,7 @@
 #include <sys/types.h>
 
 #define NEED_OPEN_FLAGS
-#define NEED_RESIZE
+//#define NEED_RESIZE
 
 /**
  * User-defined in-memory filesystem. It is as simple as possible.
