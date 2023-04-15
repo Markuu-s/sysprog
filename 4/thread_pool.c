@@ -269,6 +269,7 @@ thread_task_timed_join(struct thread_task *task, double timeout, void **result) 
     pthread_mutex_lock(&task->mutex);
     while (task->is_finished == false) {
         if (pthread_cond_timedwait(&task->cond, &task->mutex, &timespec) == ETIMEDOUT) {
+            pthread_mutex_unlock(&task->mutex);
             return TPOOL_ERR_TIMEOUT;
         }
     }
