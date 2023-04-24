@@ -19,9 +19,9 @@ main(int argc, char **argv)
 	const char *addr = argv[1];
 	const char *name = argc >= 3 ? argv[2] : "anon";
 	struct chat_client *cli = chat_client_new(name);
-	int rc = chat_client_connect(cli, addr);
-	if (rc != 0) {
-		printf("Couldn't connect: %d\n", rc);
+	int rc0 = chat_client_connect(cli, addr);
+	if (rc0 != 0) {
+		printf("Couldn't connect: %d\n", rc0);
 		chat_client_delete(cli);
 		return -1;
 	}

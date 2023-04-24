@@ -1,5 +1,14 @@
 #pragma once
 
+//#define DEBUG
+#ifdef DEBUG
+#define DEBUG_PRINT(...)    \
+printf(__VA_ARGS__)
+#else
+#define DEBUG_PRINT(...)
+#endif
+
+
 enum chat_errcode {
 	CHAT_ERR_INVALID_ARGUMENT = 1,
 	CHAT_ERR_TIMEOUT,
@@ -12,8 +21,8 @@ enum chat_errcode {
 };
 
 enum chat_events {
-	CHAT_EVENT_INPUT,
-	CHAT_EVENT_OUTPUT,
+	CHAT_EVENT_INPUT = 1,
+	CHAT_EVENT_OUTPUT = 2,
 };
 
 struct chat_message {
