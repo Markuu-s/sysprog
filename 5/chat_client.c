@@ -74,7 +74,7 @@ chat_client_connect(struct chat_client *client, const char *addr)
     hints.ai_flags = 0;
     hints.ai_protocol = 0;
 
-    struct addrinfo *result;
+    struct addrinfo *result, *rp;
 
     char **argv = calloc(2, sizeof(char*));
 
@@ -99,15 +99,20 @@ chat_client_connect(struct chat_client *client, const char *addr)
         return CHAT_ERR_NO_ADDR;
     }
 
-    if ((client->socket = socket(result->ai_family, result->ai_socktype, result->ai_protocol)) == -1) {
-        freeaddrinfo(result);
-        return CHAT_ERR_SYS;
+    for(rp = result; rp != NULL; rp = rp->ai_next) {
+        if ((client->socket = socket(result->ai_family, result->ai_socktype, result->ai_protocol)) == -1) {
+            continue;
+        }
+
+        if (connect(client->socket, result->ai_addr, result->ai_addrlen) != -1) {
+            break;
+        }
+
+        close(client->socket);
     }
 
-    if (connect(client->socket, result->ai_addr, result->ai_addrlen) == -1) {
-        freeaddrinfo(result);
-        close(client->socket);
-        client->socket = -1;
+    if (rp == NULL) {
+        perror("Could not connect");
         return CHAT_ERR_SYS;
     }
 
@@ -155,9 +160,12 @@ chat_client_update(struct chat_client *client, double timeout)
 	 * You create one struct pollfd, fill it, call poll() on it, handle the
 	 * events (do read/write).
 	 */
-    int timeout_ms = timeout < 0 ? -1 : (int)timeout * 1000;
+    int timeout_ms = timeout >= 0 ? (int)timeout * 1000 : -1;
     client->pollfd.revents = 0;
-    poll(&client->pollfd, 1, timeout_ms);
+    int err_timeout = poll(&client->pollfd, 1, timeout_ms);
+    if (err_timeout <= 0) {
+        return CHAT_ERR_TIMEOUT;
+    }
 
     if (client->pollfd.revents & POLLOUT) {
         DEBUG_PRINT("POLLOUT\n");

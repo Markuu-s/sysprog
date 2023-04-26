@@ -166,7 +166,7 @@ chat_server_update(struct chat_server *server, double timeout)
         return CHAT_ERR_NOT_STARTED;
     }
 
-    int timeout_ms = timeout > 0 ? (int)timeout * 1000 : -1;
+    int timeout_ms = timeout >= 0 ? (int)timeout * 1000 : -1;
 
     int epoll_events_count;
     int size_events = server->num_peers + 1;
@@ -306,6 +306,13 @@ chat_server_update(struct chat_server *server, double timeout)
 }
 
 int
+chat_server_get_socket(const struct chat_server *server)
+{
+    return server->socket;
+}
+
+
+int
 chat_server_get_descriptor(const struct chat_server *server)
 {
 #if NEED_SERVER_FEED
@@ -335,8 +342,18 @@ chat_server_get_events(const struct chat_server *server)
 	 * IMPLEMENT THIS FUNCTION - add OUTPUT event if has non-empty output
 	 * buffer in any of the client-sockets.
 	 */
-	(void)server;
-	return CHAT_EVENT_INPUT;
+    if (server->socket == -1) {
+        return 0;
+    }
+
+    int res = CHAT_EVENT_INPUT;
+    for(int i = 0; i < server->num_peers; ++i) {
+        if (server->peers[i].socket != -1 && (server->peers[i].size > 0)) {
+            return res | CHAT_EVENT_OUTPUT;
+        }
+    }
+
+    return res;
 }
 
 int
