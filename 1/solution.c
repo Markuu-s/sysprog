@@ -100,6 +100,7 @@ coroutine_func_f(void *context)
             coro_yield();
             tic = clock();
         }
+        printf("Coroutine #%d switch count: %lld\n", my_counter, coro_switch_count(coro_this()));
 
         init_vector(&vectors[global_counter_vector]);
         for (int i = 0; i < vector.size; ++i) {
@@ -172,15 +173,15 @@ main(int argc, char **argv)
     fclose(writeFile);
     freeVector(&vector);
     free(vectors);
-    free(files.fileNames);
 
     for(int i = 0; i < global_counter; ++i) {
-        printf("Coroutine #%d time is %f seconds\n", global_counter - i - 1, total_time[i]);
+        printf("Coroutine #%d time is %f microseconds\n", global_counter - i - 1, total_time[i] * 1000000);
     }
+    free(files.fileNames);
 
     free(total_time);
     clock_t toc = clock();
-    printf("Elapsed: %f seconds\n", (double)(toc - tic) / CLOCKS_PER_SEC);
+    printf("Elapsed: %f microseconds\n", (double)(toc - tic) / CLOCKS_PER_SEC * 1000000);
 
     return 0;
 }
