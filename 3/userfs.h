@@ -140,6 +140,10 @@ ufs_close(int fd);
 int
 ufs_delete(const char *filename);
 
+
+void
+close_program();
+
 #ifdef NEED_RESIZE
 
 /**

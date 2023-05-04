@@ -455,6 +455,8 @@ main(void)
 	test_rights();
 	test_resize();
 
+    close_program();
+
 	unit_test_finish();
 	return 0;
 }
