@@ -3,6 +3,10 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <stdint.h>
+#include "thread_pool.h"
+#include <pthread.h>
+#include <unistd.h>
+#include <stdint.h>
 
 static void
 test_new(void)
@@ -57,28 +61,63 @@ test_push(void)
     unit_fail_if(thread_pool_new(3, &p) != 0);
     int arg = 0;
     void *result;
+    /*
+     * Can delete before push.
+     */
     unit_check(thread_task_new(&t, task_incr_f, &arg) == 0,
                "created new task");
     unit_check(thread_task_delete(t) == 0,
                "task can be deleted before push");
     unit_fail_if(thread_task_new(&t, task_incr_f, &arg) != 0);
-
+    /*
+     * Bad join or delete.
+     */
     unit_check(thread_task_join(t, &result) == TPOOL_ERR_TASK_NOT_PUSHED,
                "can't join a not pushed task");
     unit_check(thread_pool_push_task(p, t) == 0, "pushed");
     unit_check(thread_task_delete(t) == TPOOL_ERR_TASK_IN_POOL,
                "can't delete before join");
-    int res = thread_task_join(t, &result);
-    printf("\nRes: %d\n", res);
-    unit_check(res == 0, "joined");
+    /*
+     * Normal push.
+     */
+    unit_check(thread_task_join(t, &result) == 0, "joined");
     unit_check(result == &arg && arg == 1, "the task really did something");
-
     unit_check(thread_pool_thread_count(p) == 1, "one active thread");
+    /*
+     * Re-push.
+     */
     unit_check(thread_pool_push_task(p, t) == 0, "pushed again");
     unit_check(thread_task_join(t, &result) == 0, "joined");
     unit_check(thread_pool_thread_count(p) == 1, "still one active thread");
     unit_check(thread_task_delete(t) == 0, "deleted after join");
-
+    /*
+     * Re-push stress.
+     */
+    const int count = 1000;
+    struct thread_task **tasks = malloc(sizeof(*tasks) * count);
+    arg = 0;
+    for (int i = 0; i < count; ++i) {
+        struct thread_task **tp = &tasks[i];
+        unit_fail_if(thread_task_new(tp, task_wait_for_f, &arg) != 0);
+        unit_fail_if(thread_pool_push_task(p, *tp) != 0);
+    }
+    __atomic_store_n(&arg, 1, __ATOMIC_RELAXED);
+    for (int i = 0; i < count; ++i) {
+        t = tasks[i];
+        unit_fail_if(thread_task_join(t, &result) != 0);
+        unit_fail_if(result != &arg);
+        if (i % 2 == 0)
+            unit_fail_if(thread_pool_push_task(p, t) != 0);
+        else
+            unit_fail_if(thread_task_delete(t) != 0);
+    }
+    for (int i = 0; i < count; i += 2) {
+        t = tasks[i];
+        unit_fail_if(thread_task_join(t, &result) != 0);
+        unit_fail_if(result != &arg);
+        unit_fail_if(thread_task_delete(t) != 0);
+    }
+    free(tasks);
     unit_fail_if(thread_pool_delete(p) != 0);
 
     unit_test_finish();
@@ -214,42 +253,101 @@ test_timed_join(void)
 #ifdef NEED_TIMED_JOIN
     unit_test_start();
 
-	struct thread_pool *p;
-	struct thread_task *task;
-	int arg = 0;
-	void *result;
-	unit_fail_if(thread_pool_new(5, &p) != 0);
-	unit_fail_if(thread_task_new(&task, task_wait_for_f, &arg) != 0);
-	unit_fail_if(thread_pool_push_task(p, task) != 0);
-	unit_check(thread_task_timed_join(task, 0, &result) ==
-		TPOOL_ERR_TIMEOUT, "timed out on 0");
+    struct thread_pool *p;
+    struct thread_task *task;
+    int arg = 0;
+    void *result;
+    unit_fail_if(thread_pool_new(5, &p) != 0);
+    unit_fail_if(thread_task_new(&task, task_wait_for_f, &arg) != 0);
+    unit_fail_if(thread_pool_push_task(p, task) != 0);
+    unit_check(thread_task_timed_join(task, 0, &result) ==
+               TPOOL_ERR_TIMEOUT, "timed out on 0");
 
-	struct timespec ts1, ts2;
-	clock_gettime(CLOCK_MONOTONIC, &ts1);
-	unit_check(thread_task_timed_join(task, 0.1, &result) ==
-		TPOOL_ERR_TIMEOUT, "timeout out on 100 ms");
-	clock_gettime(CLOCK_MONOTONIC, &ts2);
-	uint64_t ns1 = ts1.tv_sec * 1000000000 + ts1.tv_nsec;
-	uint64_t ns2 = ts2.tv_sec * 1000000000 + ts2.tv_nsec;
-	unit_check(ns2 - ns1 > 100000000, "didn't exit too early");
+    struct timespec ts1, ts2;
+    clock_gettime(CLOCK_MONOTONIC, &ts1);
+    unit_check(thread_task_timed_join(task, 0.1, &result) ==
+               TPOOL_ERR_TIMEOUT, "timeout out on 100 ms");
+    clock_gettime(CLOCK_MONOTONIC, &ts2);
+    uint64_t ns1 = ts1.tv_sec * 1000000000 + ts1.tv_nsec;
+    uint64_t ns2 = ts2.tv_sec * 1000000000 + ts2.tv_nsec;
+    unit_check(ns2 - ns1 > 100000000, "didn't exit too early");
 
-	unit_check(thread_task_timed_join(task, -10000, &result) ==
-		TPOOL_ERR_TIMEOUT, "timeout out on negative timeout");
+    unit_check(thread_task_timed_join(task, -10000, &result) ==
+               TPOOL_ERR_TIMEOUT, "timeout out on negative timeout");
 
-	clock_gettime(CLOCK_MONOTONIC, &ts1);
-	__atomic_store_n(&arg, 1, __ATOMIC_RELAXED);
-	unit_check(thread_task_timed_join(task, 1, &result) == 0,
-		"joined with 1 sec timeout");
-	clock_gettime(CLOCK_MONOTONIC, &ts2);
-	ns1 = ts1.tv_sec * 1000000000 + ts1.tv_nsec;
-	ns2 = ts2.tv_sec * 1000000000 + ts2.tv_nsec;
-	unit_check(ns2 - ns1 < 1000000000, "1 sec didn't pass");
+    clock_gettime(CLOCK_MONOTONIC, &ts1);
+    __atomic_store_n(&arg, 1, __ATOMIC_RELAXED);
+    unit_check(thread_task_timed_join(task, 1, &result) == 0,
+               "joined with 1 sec timeout");
+    clock_gettime(CLOCK_MONOTONIC, &ts2);
+    ns1 = ts1.tv_sec * 1000000000 + ts1.tv_nsec;
+    ns2 = ts2.tv_sec * 1000000000 + ts2.tv_nsec;
+    unit_check(ns2 - ns1 < 1000000000, "1 sec didn't pass");
 
-	unit_fail_if(result != &arg);
-	unit_fail_if(thread_task_delete(task) != 0);
-	unit_fail_if(thread_pool_delete(p) != 0);
+    unit_fail_if(result != &arg);
+    unit_fail_if(thread_task_delete(task) != 0);
+    unit_fail_if(thread_pool_delete(p) != 0);
 
-	unit_test_finish();
+    unit_test_finish();
+#endif
+}
+
+static void
+test_detach_stress(void)
+{
+#ifdef NEED_DETACH
+    unit_test_start();
+
+    struct thread_pool *p;
+    int arg = 0;
+    struct thread_task *task;
+    unit_fail_if(thread_pool_new(5, &p) != 0);
+    /*
+     * Push a pack of tasks which should delete themselves. The fact of
+     * deletion needs to be checked with a sanitizer like heap_help.
+     */
+    unit_check(true, "detach pushed tasks");
+    for (int i = 0; i < 1000; ++i) {
+        unit_fail_if(thread_task_new(&task, task_incr_f, &arg) != 0);
+        unit_fail_if(thread_pool_push_task(p, task) != 0);
+        if (thread_task_detach(task) != 0)
+            unit_check(false, "detach failed");
+    }
+    while (__atomic_load_n(&arg, __ATOMIC_RELAXED) != 1000)
+        usleep(1000);
+    /*
+     * Non-pushed task can not be detached.
+     */
+    unit_fail_if(thread_task_new(&task, task_incr_f, &arg) != 0);
+    unit_check(thread_task_detach(task) == TPOOL_ERR_TASK_NOT_PUSHED,
+               "detach non-pushed task");
+    unit_fail_if(thread_task_delete(task) != 0);
+    unit_fail_if(thread_pool_delete(p) != 0);
+
+    unit_test_finish();
+#endif
+}
+
+static void
+test_detach_long(void)
+{
+#ifdef NEED_DETACH
+    unit_test_start();
+
+    struct thread_pool *p;
+    int arg = 0;
+    unit_fail_if(thread_pool_new(5, &p) != 0);
+    struct thread_task *task;
+    unit_fail_if(thread_task_new(&task, task_wait_for_f, &arg) != 0);
+    unit_fail_if(thread_pool_push_task(p, task) != 0);
+    unit_check(thread_task_detach(task) == 0, "detach a long task");
+    __atomic_store_n(&arg, 1, __ATOMIC_RELAXED);
+    // Might be unable to delete the pool right away - the task needs time
+    // to complete.
+    while (thread_pool_delete(p) != 0)
+        usleep(100);
+
+    unit_test_finish();
 #endif
 }
 
@@ -263,6 +361,8 @@ main(void)
     test_thread_pool_delete();
     test_thread_pool_max_tasks();
     test_timed_join();
+    test_detach_stress();
+    test_detach_long();
 
     unit_test_finish();
     return 0;
