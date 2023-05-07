@@ -6,6 +6,7 @@
 #include <float.h>
 #include <asm-generic/errno.h>
 #include <limits.h>
+#include <math.h>
 
 
 struct thread_task {
@@ -259,6 +260,15 @@ thread_task_timed_join(struct thread_task *task, double timeout, void **result) 
         return TPOOL_ERR_TASK_NOT_PUSHED;
     }
 
+    long double eps = 10e-9;
+    if (timeout < 0 || fabsl(timeout - eps) < 0) {
+        return TPOOL_ERR_TIMEOUT;
+    }
+    timeout += eps;
+    if (timeout < 1) {
+        timeout = 1;
+    }
+
     struct timespec timespec;
     clock_gettime(CLOCK_REALTIME, &timespec);
     long int sec = (long int)timeout;
@@ -268,7 +278,7 @@ thread_task_timed_join(struct thread_task *task, double timeout, void **result) 
 
     pthread_mutex_lock(&task->mutex);
     while (task->is_finished == false) {
-        if (pthread_cond_timedwait(&task->cond, &task->mutex, &timespec) == ETIMEDOUT) {
+        if (sec == 0 && n_sec == 0 || pthread_cond_timedwait(&task->cond, &task->mutex, &timespec) == ETIMEDOUT) {
             pthread_mutex_unlock(&task->mutex);
             return TPOOL_ERR_TIMEOUT;
         }
