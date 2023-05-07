@@ -235,6 +235,9 @@ thread_task_new(struct thread_task **task, thread_task_f function, void *arg) {
     (*task)->is_join = false;
     (*task)->is_pushed = false;
     (*task)->is_detach = false;
+    pthread_mutex_init(&(*task)->mutex, NULL);
+    pthread_cond_init(&(*task)->cond, NULL);
+    (*task)->returned = NULL;
 
     return 0;
 }
