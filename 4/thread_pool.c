@@ -259,6 +259,16 @@ thread_task_timed_join(struct thread_task *task, double timeout, void **result) 
         return TPOOL_ERR_TASK_NOT_PUSHED;
     }
 
+<<<<<<< Updated upstream
+=======
+    long double eps = 10e-9;
+    if (timeout < 0 || fabsl(timeout - eps) < 0) {
+        return TPOOL_ERR_TIMEOUT;
+    }
+    timeout += eps;
+
+    pthread_mutex_lock(&task->mutex);
+>>>>>>> Stashed changes
     struct timespec timespec;
     clock_gettime(CLOCK_REALTIME, &timespec);
     long int sec = (long int)timeout;
@@ -266,7 +276,6 @@ thread_task_timed_join(struct thread_task *task, double timeout, void **result) 
     timespec.tv_sec += sec;
     timespec.tv_nsec += n_sec;
 
-    pthread_mutex_lock(&task->mutex);
     while (task->is_finished == false) {
         if (pthread_cond_timedwait(&task->cond, &task->mutex, &timespec) == ETIMEDOUT) {
             pthread_mutex_unlock(&task->mutex);

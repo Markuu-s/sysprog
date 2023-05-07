@@ -11,21 +11,25 @@
 #include <memory.h>
 #include <stdio.h>
 #include <poll.h>
+#include <fcntl.h>
+#include <ctype.h>
+#include <assert.h>
 
-#define SIZE_BUFFER 1024
 
 
 struct chat_client {
-	/** Socket connected to the server. */
-	int socket;
+    /** Socket connected to the server. */
+    int socket;
 
-	/** Array of received messages. */
-	char received_buffer[SIZE_BUFFER];
-    size_t received_buffer_size;
+    /** Array of received messages. */
+    char* received_buffer;
+    int received_buffer_size;
+    int received_buffer_capacity;
 
-	/** Output buffer. */
-    char buffer_to_send[SIZE_BUFFER];
-    size_t buffer_to_send_size;
+    /** Output buffer. */
+    char* buffer_to_send;
+    int buffer_to_send_size;
+    int buffer_to_send_capacity;
 
     struct pollfd pollfd;
 
@@ -35,24 +39,38 @@ struct chat_client {
 struct chat_client *
 chat_client_new(const char *name)
 {
-	struct chat_client *client = calloc(1, sizeof(*client));
-	client->socket = -1;
+    struct chat_client *client = calloc(1, sizeof(*client));
+    client->socket = -1;
     client->name = strdup(name);
 
     client->buffer_to_send_size = 0;
     client->received_buffer_size = 0;
+    client->received_buffer_capacity = 0;
+    client->buffer_to_send_capacity = 0;
 
-	return client;
+    return client;
 }
 
 void
 chat_client_delete(struct chat_client *client)
 {
-	if (client->socket >= 0)
-		close(client->socket);
+    if (client->socket >= 0)
+        close(client->socket);
+
+    if(client->buffer_to_send_capacity > 0){
+        free(client->buffer_to_send);
+        client->buffer_to_send_size = 0;
+        client->buffer_to_send_capacity = 0;
+    }
+
+    if(client->received_buffer_capacity > 0){
+        free(client->received_buffer);
+        client->received_buffer_size = 0;
+        client->received_buffer_capacity = 0;
+    }
 
     free(client->name);
-	free(client);
+    free(client);
 }
 
 int
@@ -62,11 +80,6 @@ chat_client_connect(struct chat_client *client, const char *addr)
         return CHAT_ERR_ALREADY_STARTED;
     }
 
-	/*
-	 * 1) Use getaddrinfo() to resolve addr to struct sockaddr_in.
-	 * 2) Create a client socket (function socket()).
-	 * 3) Connect it by the found address (function connect()).
-	 */
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
@@ -113,7 +126,14 @@ chat_client_connect(struct chat_client *client, const char *addr)
 
     if (rp == NULL) {
         perror("Could not connect");
+        freeaddrinfo(result);
         return CHAT_ERR_SYS;
+    }
+
+    if(fcntl(client->socket, F_SETFL, O_NONBLOCK | fcntl(client->socket, F_GETFL, 0)) < 0){
+        close(client->socket);
+        freeaddrinfo(result);
+        return  CHAT_ERR_SYS;
     }
 
     client->pollfd.fd = client->socket;
@@ -127,7 +147,7 @@ struct chat_message *
 chat_client_pop_next(struct chat_client *client)
 {
     struct chat_message *chat_message = NULL;
-    size_t cursor = 0;
+    int cursor = 0;
     for(; cursor < client->received_buffer_size && client->received_buffer[cursor] != '\n'; ++cursor);
     ++cursor;
     if (cursor <= client->received_buffer_size) {
@@ -136,7 +156,7 @@ chat_client_pop_next(struct chat_client *client)
         strncpy(chat_message->data, client->received_buffer, cursor);
         chat_message->data[cursor] = '\0';
 
-        for(size_t i = cursor; i < client->received_buffer_size; ++i) {
+        for(int i = cursor; i < client->received_buffer_size; ++i) {
             client->received_buffer[i - cursor] = client->received_buffer[i];
         }
         client->received_buffer_size -= cursor;
@@ -152,15 +172,9 @@ chat_client_update(struct chat_client *client, double timeout)
     if (client->socket == -1) {
         return CHAT_ERR_NOT_STARTED;
     }
-	/*
-	 * The easiest way to wait for updates on a single socket with a timeout
-	 * is to use poll(). Epoll is good for many sockets, poll is good for a
-	 * few.
-	 *
-	 * You create one struct pollfd, fill it, call poll() on it, handle the
-	 * events (do read/write).
-	 */
-    int timeout_ms = timeout >= 0 ? (int)timeout * 1000 : -1;
+
+
+    int timeout_ms = timeout >= 0 ? (int)(timeout * 1000) : -1;
     client->pollfd.revents = 0;
     int err_timeout = poll(&client->pollfd, 1, timeout_ms);
     if (err_timeout <= 0) {
@@ -168,38 +182,51 @@ chat_client_update(struct chat_client *client, double timeout)
     }
 
     if (client->pollfd.revents & POLLOUT) {
-        DEBUG_PRINT("POLLOUT\n");
+        if(client->buffer_to_send_capacity == 0){
+            client->pollfd.events ^= POLLOUT;
+            return 0;
+        }
 
         ssize_t sent_bytes = send(client->socket, client->buffer_to_send, client->buffer_to_send_size, 0);
         if (sent_bytes < 0) {
             return CHAT_ERR_SYS;
         }
+
         if (sent_bytes == 0) {
             close(client->socket);
             client->socket = -1;
             return 0;
         }
-        else {
-            for(size_t i = sent_bytes; i < client->buffer_to_send_size; ++i) {
-                client->buffer_to_send[i - sent_bytes] = client->buffer_to_send[i];
-            }
 
-            client->buffer_to_send_size -= sent_bytes;
-            if (client->buffer_to_send_size == 0) {
-                client->pollfd.events ^= POLLOUT;
-            }
+        if(client->buffer_to_send_size - sent_bytes <= 0){
+            client->buffer_to_send_capacity = 0;
+            client->buffer_to_send_size = 0;
+            free(client->buffer_to_send);
+            client->pollfd.events ^= POLLOUT;
+        }else{
+            char * copy = strdup(client->buffer_to_send + sent_bytes);
+            memset(client->buffer_to_send, '\0', client->buffer_to_send_capacity);
+            client->buffer_to_send_size = strlen(copy);
+            strcpy(client->buffer_to_send, copy);
+            free(copy);
+        }
+    }
+
+    if (client->pollfd.revents & POLLIN) {
+        if(client->received_buffer_capacity == 0){
+            client->received_buffer_capacity = MAX_BUFFER_SIZE;
+            client->received_buffer = calloc(client->received_buffer_capacity, sizeof(char));
+            client->received_buffer_size = 0;
         }
 
-    }
-    if (client->pollfd.revents & POLLIN) {
-        DEBUG_PRINT("POLLIN\n");
-        ssize_t recv_bytes = recv(client->socket, client->received_buffer + client->received_buffer_size, SIZE_BUFFER - client->received_buffer_size, MSG_DONTWAIT);
+        if(client->received_buffer_size == client->received_buffer_capacity){
+            client->received_buffer_capacity *= 2;
+            client->received_buffer = realloc(client->received_buffer, client->received_buffer_capacity*sizeof(char));
+        }
+
+        ssize_t recv_bytes = recv(client->socket, client->received_buffer + client->received_buffer_size, client->received_buffer_capacity - client->received_buffer_size, 0);
         if (recv_bytes < 0) {
             return CHAT_ERR_SYS;
-        } else if (recv_bytes == 0) {
-            close(client->socket);
-            client->socket = -1;
-            return 0;
         }
         client->received_buffer_size += recv_bytes;
     }
@@ -210,17 +237,12 @@ chat_client_update(struct chat_client *client, double timeout)
 int
 chat_client_get_descriptor(const struct chat_client *client)
 {
-	return client->socket;
+    return client->socket;
 }
 
 int
 chat_client_get_events(const struct chat_client *client)
 {
-	/*
-	 * IMPLEMENT THIS FUNCTION - add OUTPUT event if has non-empty output
-	 * buffer.
-	 */
-
     if (client->socket == -1) {
         return 0;
     }
@@ -234,29 +256,80 @@ chat_client_feed(struct chat_client *client, const char *msg, uint32_t msg_size)
         return CHAT_ERR_NOT_STARTED;
     }
 
-    char *new_msg = calloc(msg_size, sizeof(char));
-    int flag = 0;
-    int cursor = 0;
-    for(uint32_t i = 0; i < msg_size; ++i) {
-        if (msg[i] != ' ') {
-            new_msg[cursor++] = msg[i];
-            flag = msg[i] == '\n' ? 0 : 1;
-        } else {
-            if (flag) {
-                new_msg[cursor++] = msg[i];
-            }
+    if(client->buffer_to_send_capacity == 0){
+        client->buffer_to_send_capacity = MAX_BUFFER_SIZE;
+        client->buffer_to_send = calloc(client->buffer_to_send_capacity, sizeof(char));
+    }
+
+    const char * message = msg;
+    char * last = NULL;
+    while((last = strchr(message,  '\n')) != NULL){
+        int size = last - message + 1;
+        if(last >= msg + msg_size){
+            goto lastMsg;
+        }
+
+        char * new_message = calloc(size, sizeof(char));
+        int cursor = 0;
+
+        int start = 0, end = size - 1;
+        for(; isspace(message[start]); ++start);
+        for(; isspace(message[end]); --end);
+        for(; start <= end; ++start) {
+            new_message[cursor++] = message[start];
+        }
+
+        new_message[cursor++] = '\n';
+
+        if(client->buffer_to_send_capacity - client->buffer_to_send_size < cursor + 1){
+            client->buffer_to_send_capacity = client->buffer_to_send_size + cursor + 1;
+            client->buffer_to_send = realloc(client->buffer_to_send, client->buffer_to_send_capacity*sizeof(char));
+        }
+
+        strncpy(client->buffer_to_send + client->buffer_to_send_size, new_message, cursor);
+        client->buffer_to_send_size += cursor;
+
+        client->buffer_to_send[client->buffer_to_send_size] = '\0';
+        assert((int)strlen(client->buffer_to_send) == client->buffer_to_send_size);
+
+        client->pollfd.events |= POLLOUT;
+
+        free(new_message);
+        message = last + 1;
+        if (last + 1 == msg + msg_size) {
+            break;
         }
     }
 
-    if (cursor == 0) {
-        return -1;
+    int size;
+    lastMsg:
+    size = msg + msg_size - message;
+    if(size <= 0){
+        return 0;
     }
 
-    strncpy(client->buffer_to_send + client->buffer_to_send_size, new_msg, cursor);
+    char * new_message = calloc(size, sizeof(char));
+    int cursor = 0;
+
+    int start = 0, end = size - 1;
+    for(; isspace(message[start]); ++start);
+    for(; isspace(message[end]); --end);
+    for(; start <= end; ++start) {
+        new_message[cursor++] = message[start];
+    }
+
+    if(client->buffer_to_send_capacity - client->buffer_to_send_size < cursor + 1){
+        client->buffer_to_send_capacity = client->buffer_to_send_size + cursor + 1;
+        client->buffer_to_send = realloc(client->buffer_to_send, client->buffer_to_send_capacity*sizeof(char));
+    }
+
+    strncpy(client->buffer_to_send + client->buffer_to_send_size, new_message, cursor);
     client->buffer_to_send_size += cursor;
+
+    client->buffer_to_send[client->buffer_to_send_size] = '\0';
 
     client->pollfd.events |= POLLOUT;
 
-    free(new_msg);
+    free(new_message);
     return 0;
 }

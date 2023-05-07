@@ -1,7 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
 project(SysProga5)
 
-#set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wextra -Wpedantic -Werror -Wall -Wno-gnu-folding-constant")
+#set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wextra -Wpedantic -Werror -Wall -Wno-gnu-folding-constant -pthread")
+
+#add_compile_options(-fsanitize=address)
+#add_link_options(-fsanitize=address)
 
 include_directories(../utils)
 

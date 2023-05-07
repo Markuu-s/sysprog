@@ -9,6 +9,8 @@ printf(__VA_ARGS__)
 #endif
 
 
+#define MAX_BUFFER_SIZE 1024
+
 enum chat_errcode {
 	CHAT_ERR_INVALID_ARGUMENT = 1,
 	CHAT_ERR_TIMEOUT,
