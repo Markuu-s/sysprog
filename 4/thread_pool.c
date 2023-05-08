@@ -268,9 +268,6 @@ thread_task_timed_join(struct thread_task *task, double timeout, void **result) 
         return TPOOL_ERR_TIMEOUT;
     }
     timeout += eps;
-    if (timeout < 1) {
-        timeout = 1;
-    }
 
     struct timespec timespec;
     clock_gettime(CLOCK_REALTIME, &timespec);
